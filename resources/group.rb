@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 #
 # Author:: Gilles Devaux <gilles.devaux@gmail.com>
 # Cookbook Name:: supervisor

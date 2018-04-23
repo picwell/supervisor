@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 #
 # Cookbook:: supervisor_service_test
 # Recipe:: default

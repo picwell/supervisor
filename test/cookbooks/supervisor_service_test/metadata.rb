@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 name 'supervisor_service_test'
 maintainer 'The Authors'
 maintainer_email 'you@example.com'
