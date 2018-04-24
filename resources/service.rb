@@ -56,8 +56,6 @@ property :eventlistener, [TrueClass, FalseClass], default: false
 property :eventlistener_buffer_size, Integer, default: 0
 property :eventlistener_events, Array, default: []
 
-attr_accessor :state
-
 default_action :enable
 
 action :enable do
@@ -78,7 +76,7 @@ action :enable do
 end
 
 action :disable do
-  if current_resource.state == 'UNAVAILABLE'
+  if get_current_state(new_resource.service_name) == 'UNAVAILABLE'
     Chef::Log.info "#{new_resource} is already disabled."
   else
     execute 'supervisorctl update' do
@@ -94,7 +92,7 @@ action :disable do
 end
 
 action :start do
-  case current_resource.state
+  case get_current_state(new_resource.service_name)
   when 'UNAVAILABLE'
     raise "Supervisor service #{new_resource.name} cannot be started because it does not exist"
   when 'RUNNING'
@@ -112,7 +110,7 @@ action :start do
 end
 
 action :stop do
-  case current_resource.state
+  case get_current_state(new_resource.service_name)
   when 'UNAVAILABLE'
     raise "Supervisor service #{new_resource.name} cannot be stopped because it does not exist"
   when 'STOPPED'
@@ -130,7 +128,7 @@ action :stop do
 end
 
 action :restart do
-  case current_resource.state
+  case get_current_state(new_resource.service_name)
   when 'UNAVAILABLE'
     raise "Supervisor service #{new_resource.name} cannot be restarted because it does not exist"
   else
@@ -142,47 +140,44 @@ action :restart do
   end
 end
 
-def supervisorctl(action)
-  cmd = "supervisorctl #{action} #{cmd_line_args} | grep -v ERROR"
-  result = Mixlib::ShellOut.new(cmd).run_command
-  # Since we append grep to the command
-  # The command will have an exit code of 1 upon failure
-  # So 0 here means it was successful
-  result.exitstatus == 0
-end
-
-def cmd_line_args
-  name = new_resource.service_name
-
-  name += ':*' if new_resource.process_name != '%(program_name)s'
-
-  name
-end
-
-def get_current_state(service_name)
-  result = Mixlib::ShellOut.new('supervisorctl status').run_command
-  match = result.stdout.match("(^#{service_name}(\\:\\S+)?\\s*)([A-Z]+)(.+)")
-  if match.nil?
-    'UNAVAILABLE'
-  else
-    match[3]
-  end
-end
-
-def load_current_resource
-  @current_resource = Chef::Resource::SupervisorService.new(@new_resource.name)
-  @current_resource.state = get_current_state(@new_resource.name)
-end
-
-def wait_til_state(state, max_tries = 20)
-  service = new_resource.service_name
-
-  max_tries.times do
-    return if get_current_state(service) == state
-
-    Chef::Log.debug("Waiting for service #{service} to be in state #{state}")
-    sleep 1
+action_class do
+  def supervisorctl(action)
+    cmd = "supervisorctl #{action} #{cmd_line_args} | grep -v ERROR"
+    result = Mixlib::ShellOut.new(cmd).run_command
+    # Since we append grep to the command
+    # The command will have an exit code of 1 upon failure
+    # So 0 here means it was successful
+    result.exitstatus == 0
   end
 
-  raise "service #{service} not in state #{state} after #{max_tries} tries"
+  def cmd_line_args
+    name = new_resource.service_name
+
+    name += ':*' if new_resource.process_name != '%(program_name)s'
+
+    name
+  end
+
+  def get_current_state(service_name)
+    result = Mixlib::ShellOut.new('supervisorctl status').run_command
+    match = result.stdout.match("(^#{service_name}(\\:\\S+)?\\s*)([A-Z]+)(.+)")
+    if match.nil?
+      'UNAVAILABLE'
+    else
+      match[3]
+    end
+  end
+
+  def wait_til_state(state, max_tries = 20)
+    service = new_resource.service_name
+
+    max_tries.times do
+      return if get_current_state(service) == state
+
+      Chef::Log.debug("Waiting for service #{service} to be in state #{state}")
+      sleep 1
+    end
+
+    raise "service #{service} not in state #{state} after #{max_tries} tries"
+  end
 end

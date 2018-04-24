@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 #
-# Cookbook:: supervisor_service_test
+# Cookbook:: start_service
 # Recipe:: default
 #
 # Copyright:: 2018, The Authors, All Rights Reserved.
 include_recipe 'supervisor::default'
 
-supervisor_service 'test_service'
+supervisor_service 'start_service' do
+  action [:enable, :start]
+end
