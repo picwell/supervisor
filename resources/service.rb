@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 #
 # Author:: Noah Kantrowitz <noah@opscode.com>
 # Cookbook Name:: supervisor
@@ -17,44 +18,166 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+resource_name :supervisor_service
 
-actions :enable, :disable, :start, :stop, :restart
+property :service_name, String, name_property: true
+property :command, String
+property :process_name, String, default: '%(program_name)s'
+property :numprocs, Integer, default: 1
+property :numprocs_start, Integer, default: 0
+property :priority, Integer, default: 999
+property :autostart, [TrueClass, FalseClass], default: true
+property :autorestart, [String, Symbol, TrueClass, FalseClass], default: :unexpected
+property :startsecs, Integer, default: 1
+property :startretries, Integer, default: 3
+property :exitcodes, Array, default: [0, 2]
+property :stopsignal, [String, Symbol], default: :TERM
+property :stopwaitsecs, Integer, default: 10
+property :stopasgroup, [TrueClass, FalseClass], default: false
+property :killasgroup, [TrueClass, FalseClass], default: false
+property :user, [String, NilClass], default: nil
+property :redirect_stderr, [TrueClass, FalseClass], default: false
+property :stdout_logfile, String, default: 'AUTO'
+property :stdout_logfile_maxbytes, String, default: '50MB'
+property :stdout_logfile_backups, Integer, default: 10
+property :stdout_capture_maxbytes, String, default: '0'
+property :stdout_events_enabled, [TrueClass, FalseClass], default: false
+property :stderr_logfile, String, default: 'AUTO'
+property :stderr_logfile_maxbytes, String, default: '50MB'
+property :stderr_logfile_backups, Integer, default: 10
+property :stderr_capture_maxbytes, String, default: '0'
+property :stderr_events_enabled, [TrueClass, FalseClass], default: false
+property :environment, Hash, default: {}
+property :directory, [String, NilClass], default: nil
+property :umask, [NilClass, String], default: nil
+property :serverurl, String, default: 'AUTO'
+
+property :eventlistener, [TrueClass, FalseClass], default: false
+property :eventlistener_buffer_size, Integer, default: 0
+property :eventlistener_events, Array, default: []
+
 default_action :enable
 
-attribute :service_name, :kind_of => String, :name_attribute => true
-attribute :command, :kind_of => String
-attribute :process_name, :kind_of => String, :default => '%(program_name)s'
-attribute :numprocs, :kind_of => Integer, :default => 1
-attribute :numprocs_start, :kind_of => Integer, :default => 0
-attribute :priority, :kind_of => Integer, :default => 999
-attribute :autostart, :kind_of => [TrueClass, FalseClass], :default => true
-attribute :autorestart, :kind_of => [String, Symbol, TrueClass, FalseClass], :default => :unexpected
-attribute :startsecs, :kind_of => Integer, :default => 1
-attribute :startretries, :kind_of => Integer, :default => 3
-attribute :exitcodes, :kind_of => Array, :default => [0, 2]
-attribute :stopsignal, :kind_of => [String, Symbol], :default => :TERM
-attribute :stopwaitsecs, :kind_of => Integer, :default => 10
-attribute :stopasgroup, :kind_of => [TrueClass,FalseClass], :default => nil
-attribute :killasgroup, :kind_of => [TrueClass,FalseClass], :default => nil
-attribute :user, :kind_of => [String, NilClass], :default => nil
-attribute :redirect_stderr, :kind_of => [TrueClass, FalseClass], :default => false
-attribute :stdout_logfile, :kind_of => String, :default => 'AUTO'
-attribute :stdout_logfile_maxbytes, :kind_of => String, :default => '50MB'
-attribute :stdout_logfile_backups, :kind_of => Integer, :default => 10
-attribute :stdout_capture_maxbytes, :kind_of => String, :default => '0'
-attribute :stdout_events_enabled, :kind_of => [TrueClass, FalseClass], :default => false
-attribute :stderr_logfile, :kind_of => String, :default => 'AUTO'
-attribute :stderr_logfile_maxbytes, :kind_of => String, :default => '50MB'
-attribute :stderr_logfile_backups, :kind_of => Integer, :default => 10
-attribute :stderr_capture_maxbytes, :kind_of => String, :default => '0'
-attribute :stderr_events_enabled, :kind_of => [TrueClass, FalseClass], :default => false
-attribute :environment, :kind_of => Hash, :default => {}
-attribute :directory, :kind_of => [String, NilClass], :default => nil
-attribute :umask, :kind_of => [NilClass, String], :default => nil
-attribute :serverurl, :kind_of => String, :default => 'AUTO'
+action :enable do
+  execute 'supervisorctl update' do
+    action :nothing
+    user 'root'
+  end
 
-attribute :eventlistener, :kind_of => [TrueClass,FalseClass], :default => false
-attribute :eventlistener_buffer_size, :kind_of => Integer, :default => nil
-attribute :eventlistener_events, :kind_of => Array, :default => nil
+  template "#{node['supervisor']['dir']}/#{new_resource.service_name}.conf" do
+    source 'program.conf.erb'
+    cookbook 'supervisor'
+    owner 'root'
+    group 'root'
+    mode '644'
+    variables prog: new_resource
+    notifies :run, 'execute[supervisorctl update]', :immediately
+  end
+end
 
-attr_accessor :state
+action :disable do
+  if get_current_state(new_resource.service_name) == 'UNAVAILABLE'
+    Chef::Log.info "#{new_resource} is already disabled."
+  else
+    execute 'supervisorctl update' do
+      action :nothing
+      user 'root'
+    end
+
+    file "#{node['supervisor']['dir']}/#{new_resource.service_name}.conf" do
+      action :delete
+      notifies :run, 'execute[supervisorctl update]', :immediately
+    end
+  end
+end
+
+action :start do
+  case get_current_state(new_resource.service_name)
+  when 'UNAVAILABLE'
+    raise "Supervisor service #{new_resource.name} cannot be started because it does not exist"
+  when 'RUNNING'
+    Chef::Log.debug "#{new_resource} is already started."
+  when 'STARTING'
+    Chef::Log.debug "#{new_resource} is already starting."
+    wait_til_state('RUNNING')
+  else
+    converge_by("Starting #{new_resource}") do
+      unless supervisorctl('start')
+        raise "Supervisor service #{new_resource.name} was unable to be started"
+      end
+    end
+  end
+end
+
+action :stop do
+  case get_current_state(new_resource.service_name)
+  when 'UNAVAILABLE'
+    raise "Supervisor service #{new_resource.name} cannot be stopped because it does not exist"
+  when 'STOPPED'
+    Chef::Log.debug "#{new_resource} is already stopped."
+  when 'STOPPING'
+    Chef::Log.debug "#{new_resource} is already stopping."
+    wait_til_state('STOPPED')
+  else
+    converge_by("Stopping #{new_resource}") do
+      unless supervisorctl('stop')
+        raise "Supervisor service #{new_resource.name} was unable to be stopped"
+      end
+    end
+  end
+end
+
+action :restart do
+  case get_current_state(new_resource.service_name)
+  when 'UNAVAILABLE'
+    raise "Supervisor service #{new_resource.name} cannot be restarted because it does not exist"
+  else
+    converge_by("Restarting #{new_resource}") do
+      unless supervisorctl('restart')
+        raise "Supervisor service #{new_resource.name} was unable to be started"
+      end
+    end
+  end
+end
+
+action_class do
+  def supervisorctl(action)
+    cmd = "supervisorctl #{action} #{cmd_line_args} | grep -v ERROR"
+    result = Mixlib::ShellOut.new(cmd).run_command
+    # Since we append grep to the command
+    # The command will have an exit code of 1 upon failure
+    # So 0 here means it was successful
+    result.exitstatus == 0
+  end
+
+  def cmd_line_args
+    name = new_resource.service_name
+
+    name += ':*' if new_resource.process_name != '%(program_name)s'
+
+    name
+  end
+
+  def get_current_state(service_name)
+    result = Mixlib::ShellOut.new('supervisorctl status').run_command
+    match = result.stdout.match("(^#{service_name}(\\:\\S+)?\\s*)([A-Z]+)(.+)")
+    if match.nil?
+      'UNAVAILABLE'
+    else
+      match[3]
+    end
+  end
+
+  def wait_til_state(state, max_tries = 20)
+    service = new_resource.service_name
+
+    max_tries.times do
+      return if get_current_state(service) == state
+
+      Chef::Log.debug("Waiting for service #{service} to be in state #{state}")
+      sleep 1
+    end
+
+    raise "service #{service} not in state #{state} after #{max_tries} tries"
+  end
+end

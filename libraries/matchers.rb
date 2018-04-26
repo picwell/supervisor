@@ -1,3 +1,4 @@
+# frozen_string_literal: true
 if defined?(ChefSpec)
   def enable_supervisor_service(service_name)
     ChefSpec::Matchers::ResourceMatcher.new(:supervisor_service, :enable, service_name)
